@@ -38,17 +38,38 @@ function isContractFileName(name) {
 }
 
 /**
+ * List all objects/folders under prefix (Storage API returns max `limit` per call).
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @param {string} bucket
+ * @param {string} prefix folder path, no leading/trailing slashes
+ */
+async function listAllStorageItems(supabase, bucket, prefix) {
+  const limit = 1000;
+  const all = [];
+  let offset = 0;
+  for (;;) {
+    const { data, error } = await supabase.storage.from(bucket).list(prefix || '', {
+      limit,
+      offset,
+      sortBy: { column: 'name', order: 'asc' },
+    });
+    if (error) throw new Error(`Storage list "${prefix || '/'}": ${error.message}`);
+    const chunk = data || [];
+    all.push(...chunk);
+    if (chunk.length < limit) break;
+    offset += limit;
+  }
+  return all;
+}
+
+/**
  * Recursively collect storage object paths (relative to bucket root) for supported extensions.
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} bucket
  * @param {string} prefix folder path, no leading/trailing slashes
  */
 export async function collectContractObjectPaths(supabase, bucket, prefix) {
-  const { data, error } = await supabase.storage.from(bucket).list(prefix || '', {
-    limit: 1000,
-    sortBy: { column: 'name', order: 'asc' },
-  });
-  if (error) throw new Error(`Storage list "${prefix || '/'}": ${error.message}`);
+  const data = await listAllStorageItems(supabase, bucket, prefix);
 
   const out = [];
   for (const item of data || []) {
