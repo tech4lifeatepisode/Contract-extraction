@@ -3,6 +3,7 @@ import OpenAI from 'openai';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { syncExtractionsToSupabase } from './supabase-output.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -409,6 +410,8 @@ async function main() {
   ];
 
   const rows = [header.join(',')];
+  /** @type {object[]} */
+  const dataRows = [];
 
   for (const name of files.sort()) {
     const full = path.join(CONTRACTS_DIR, name);
@@ -436,6 +439,21 @@ async function main() {
           escapeCsvCell(''),
         ].join(','),
       );
+      dataRows.push({
+        nc: data.nc,
+        name: data.name,
+        id_type: data.id_type,
+        id_number: data.id_number,
+        check_in_date: data.check_in_date,
+        check_out_date: data.check_out_date,
+        rent: data.rent,
+        deposit: data.deposit,
+        deposit_wording: data.deposit_wording,
+        deposit_source: data.deposit_source,
+        file_name: name,
+        model_used: data.model_used,
+        error: '',
+      });
       console.log(`OK: ${name}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -456,12 +474,36 @@ async function main() {
           escapeCsvCell(msg),
         ].join(','),
       );
+      dataRows.push({
+        nc,
+        name: nameFromFile,
+        id_type: '',
+        id_number: '',
+        check_in_date: '',
+        check_out_date: '',
+        rent: '',
+        deposit: '',
+        deposit_wording: '',
+        deposit_source: '',
+        file_name: name,
+        model_used: DEFAULT_MODEL,
+        error: msg,
+      });
       console.error(`FAIL: ${name} — ${msg}`);
     }
   }
 
   await fs.writeFile(outPath, rows.join('\r\n') + '\r\n', 'utf8');
   console.log(`\nWrote: ${outPath}`);
+
+  try {
+    await syncExtractionsToSupabase({ csvPath: outPath, dataRows });
+  } catch (syncErr) {
+    console.error(
+      'Supabase sync failed (CSV still saved locally):',
+      syncErr instanceof Error ? syncErr.message : syncErr,
+    );
+  }
 }
 
 main().catch((e) => {

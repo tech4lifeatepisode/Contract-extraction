@@ -7,6 +7,7 @@
     "extract": "node extract-contracts.mjs"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.49.1",
     "dotenv": "^16.4.7",
     "openai": "^4.85.0"
   }
