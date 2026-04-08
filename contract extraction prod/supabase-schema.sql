@@ -40,6 +40,15 @@ create policy "contract_extractions_insert_anon"
   to anon
   with check (true);
 
+-- SKIP_ALREADY_EXTRACTED needs to SELECT file_name. Anon cannot read without this (RLS).
+-- Service role bypasses RLS; if you only use service_role in production, this is optional.
+drop policy if exists "contract_extractions_select_anon" on public.contract_extractions;
+create policy "contract_extractions_select_anon"
+  on public.contract_extractions
+  for select
+  to anon
+  using (true);
+
 drop policy if exists "contract_extractions_select_authenticated" on public.contract_extractions;
 -- Optional: allow read for authenticated users only; adjust as needed.
 -- create policy "contract_extractions_select_authenticated" on public.contract_extractions for select to authenticated using (true);

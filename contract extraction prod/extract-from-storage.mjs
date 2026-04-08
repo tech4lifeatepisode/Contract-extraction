@@ -21,6 +21,15 @@ function getSupabaseKey() {
   );
 }
 
+/** Accepts true/1/yes/on (case-insensitive). Render and .env sometimes use True or 1. */
+export function isEnvTruthy(name) {
+  const v = process.env[name];
+  if (v == null) return false;
+  const s = String(v).trim();
+  if (s === '') return false;
+  return /^(1|true|yes|on)$/i.test(s);
+}
+
 /**
  * @param {string} name
  */
@@ -119,6 +128,32 @@ async function entriesFromPublicUrls(urlText) {
   return out;
 }
 
+/**
+ * Paths already stored in contract_extractions.file_name (full storage path, e.g. Untitled folder/x.pdf).
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ */
+async function fetchAlreadyExtractedStoragePaths(supabase) {
+  const set = new Set();
+  const page = 1000;
+  let from = 0;
+  for (;;) {
+    const { data, error } = await supabase
+      .from('contract_extractions')
+      .select('file_name')
+      .not('file_name', 'is', null)
+      .order('id', { ascending: true })
+      .range(from, from + page - 1);
+    if (error) throw new Error(`Supabase read file_name: ${error.message}`);
+    if (!data?.length) break;
+    for (const row of data) {
+      if (row.file_name) set.add(row.file_name);
+    }
+    if (data.length < page) break;
+    from += page;
+  }
+  return set;
+}
+
 export async function runExtractFromSupabaseStorage() {
   const url = process.env.SUPABASE_URL;
   const key = getSupabaseKey();
@@ -144,8 +179,18 @@ export async function runExtractFromSupabaseStorage() {
   const paths = await collectContractObjectPaths(supabase, bucket, folder);
   let sorted = [...new Set(paths)].sort();
 
+  if (isEnvTruthy('SKIP_ALREADY_EXTRACTED')) {
+    const done = await fetchAlreadyExtractedStoragePaths(supabase);
+    const n = sorted.length;
+    sorted = sorted.filter((p) => !done.has(p));
+    console.log(
+      `SKIP_ALREADY_EXTRACTED: ${n - sorted.length} already in contract_extractions, ${sorted.length} not yet extracted.`,
+    );
+  }
+
   const maxRaw = process.env.MAX_EXTRACTION_FILES;
   const maxFiles = maxRaw != null && String(maxRaw).trim() !== '' ? Number(maxRaw) : null;
+  const pendingBeforeSlice = sorted.length;
   if (maxFiles != null && Number.isFinite(maxFiles) && maxFiles > 0 && sorted.length > maxFiles) {
     console.log(`Limiting to ${maxFiles} of ${sorted.length} file(s) (MAX_EXTRACTION_FILES).`);
     sorted = sorted.slice(0, maxFiles);
@@ -168,6 +213,9 @@ export async function runExtractFromSupabaseStorage() {
         );
       }
     }
+  } else if (paths.length > 0) {
+    console.log('No files left to extract in this folder (all listed objects already in contract_extractions).');
+    return { processed: 0, allAlreadyExtracted: true, pendingBeforeSlice: 0 };
   } else {
     const publicUrls = process.env.CONTRACT_PUBLIC_URLS || '';
     if (publicUrls.trim()) {
@@ -184,8 +232,9 @@ export async function runExtractFromSupabaseStorage() {
   if (entries.length === 0) {
     if (sorted.length > 0) {
       console.error('All storage downloads failed (0 files ready). Check network or Storage; see logs above.');
+      return { processed: 0, downloadsAllFailed: true, pendingBeforeSlice };
     }
-    return { processed: 0 };
+    return { processed: 0, pendingBeforeSlice };
   }
 
   console.log(`Extracting ${entries.length} file(s)...`);
@@ -193,7 +242,7 @@ export async function runExtractFromSupabaseStorage() {
   const client = new OpenAI({ apiKey });
   await runExtractionPipeline(client, entries);
 
-  return { processed: entries.length };
+  return { processed: entries.length, pendingBeforeSlice };
 }
 
 const isDirectRun =
