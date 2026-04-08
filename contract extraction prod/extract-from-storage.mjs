@@ -43,7 +43,7 @@ function isContractFileName(name) {
  * @param {string} bucket
  * @param {string} prefix folder path, no leading/trailing slashes
  */
-async function collectContractObjectPaths(supabase, bucket, prefix) {
+export async function collectContractObjectPaths(supabase, bucket, prefix) {
   const { data, error } = await supabase.storage.from(bucket).list(prefix || '', {
     limit: 1000,
     sortBy: { column: 'name', order: 'asc' },

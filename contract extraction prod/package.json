@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node server.mjs",
     "extract": "node extract-contracts.mjs",
-    "extract:storage": "node extract-from-storage.mjs"
+    "extract:storage": "node extract-from-storage.mjs",
+    "extract:storage:all": "node extract-from-storage-batch.mjs",
+    "verify:extraction": "node verify-extraction-status.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.1",
