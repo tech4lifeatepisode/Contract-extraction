@@ -1,0 +1,10 @@
+{
+  "name": "contract-extraction-monorepo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "postinstall": "npm install --prefix \"contract extraction prod\"",
+    "start": "node \"./contract extraction prod/server.mjs\"",
+    "extract": "node \"./contract extraction prod/extract-contracts.mjs\""
+  }
+}
