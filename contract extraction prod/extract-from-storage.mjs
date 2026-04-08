@@ -74,15 +74,24 @@ async function collectContractObjectPaths(supabase, bucket, prefix) {
  * @param {string} objectPath
  */
 async function downloadObject(supabase, bucket, objectPath) {
-  const { data, error } = await supabase.storage.from(bucket).download(objectPath);
-  if (error) throw new Error(`Download "${objectPath}": ${error.message}`);
-  const buf = Buffer.from(await data.arrayBuffer());
-  return buf;
+  const maxAttempts = Number(process.env.STORAGE_DOWNLOAD_RETRIES) || 4;
+  let lastMsg = '';
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const { data, error } = await supabase.storage.from(bucket).download(objectPath);
+    if (!error && data) {
+      return Buffer.from(await data.arrayBuffer());
+    }
+    lastMsg = error?.message || 'unknown error';
+    if (attempt < maxAttempts) {
+      await new Promise((r) => setTimeout(r, 500 * attempt * attempt));
+    }
+  }
+  throw new Error(`Download "${objectPath}": ${lastMsg}`);
 }
 
 /**
  * When Storage list is empty (bucket name, RLS), optionally fetch public object URLs.
- * Same shape as …/object/public/Contracts/HouseMonk%20Sample%20Contracts/file.docx
+ * Same shape as …/object/public/Contracts/<SUPABASE_STORAGE_FOLDER>/file.docx
  * @param {string} urlText newline- or comma-separated
  */
 async function entriesFromPublicUrls(urlText) {
@@ -115,7 +124,7 @@ export async function runExtractFromSupabaseStorage() {
   const key = getSupabaseKey();
   const bucket = process.env.SUPABASE_STORAGE_BUCKET;
   const folder =
-    (process.env.SUPABASE_STORAGE_FOLDER || 'HouseMonk Sample Contracts').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+    (process.env.SUPABASE_STORAGE_FOLDER || 'Untitled folder').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
 
   if (!url || !key) {
     throw new Error('SUPABASE_URL and a Supabase key are required for storage extraction.');
@@ -133,7 +142,14 @@ export async function runExtractFromSupabaseStorage() {
   console.log(`Listing contracts in bucket "${bucket}" under "${folder || '(root)'}"...`);
 
   const paths = await collectContractObjectPaths(supabase, bucket, folder);
-  const sorted = [...new Set(paths)].sort();
+  let sorted = [...new Set(paths)].sort();
+
+  const maxRaw = process.env.MAX_EXTRACTION_FILES;
+  const maxFiles = maxRaw != null && String(maxRaw).trim() !== '' ? Number(maxRaw) : null;
+  if (maxFiles != null && Number.isFinite(maxFiles) && maxFiles > 0 && sorted.length > maxFiles) {
+    console.log(`Limiting to ${maxFiles} of ${sorted.length} file(s) (MAX_EXTRACTION_FILES).`);
+    sorted = sorted.slice(0, maxFiles);
+  }
 
   /** @type {{ name: string, buffer: Buffer, storagePath?: string }[]} */
   let entries = [];
@@ -141,9 +157,16 @@ export async function runExtractFromSupabaseStorage() {
   if (sorted.length > 0) {
     console.log(`Found ${sorted.length} file(s) via Storage API. Downloading...`);
     for (const objectPath of sorted) {
-      const buf = await downloadObject(supabase, bucket, objectPath);
-      const baseName = path.basename(objectPath);
-      entries.push({ name: baseName, buffer: buf, storagePath: objectPath });
+      try {
+        const buf = await downloadObject(supabase, bucket, objectPath);
+        const baseName = path.basename(objectPath);
+        entries.push({ name: baseName, buffer: buf, storagePath: objectPath });
+      } catch (e) {
+        console.error(
+          `[download failed] ${objectPath}:`,
+          e instanceof Error ? e.message : e,
+        );
+      }
     }
   } else {
     const publicUrls = process.env.CONTRACT_PUBLIC_URLS || '';
@@ -159,6 +182,9 @@ export async function runExtractFromSupabaseStorage() {
   }
 
   if (entries.length === 0) {
+    if (sorted.length > 0) {
+      console.error('All storage downloads failed (0 files ready). Check network or Storage; see logs above.');
+    }
     return { processed: 0 };
   }
 
