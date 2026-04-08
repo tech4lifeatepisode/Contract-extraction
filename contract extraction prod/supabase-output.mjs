@@ -37,7 +37,7 @@ async function insertContractRows(supabase, records) {
  * @param {import('@supabase/supabase-js').SupabaseClient} supabase
  * @param {string} csvPath
  * @param {string} bucket
- * @param {string} folderPrefix e.g. "To Fill 1"
+ * @param {string} folderPrefix e.g. "To Fill 2"
  */
 async function uploadCsvToStorage(supabase, csvPath, bucket, folderPrefix) {
   const buf = await fs.readFile(csvPath);
@@ -74,7 +74,7 @@ export async function syncExtractionsToSupabase({ csvPath, dataRows }) {
   const supabase = createClient(url, key);
   const bucket = process.env.SUPABASE_STORAGE_BUCKET;
   const folder =
-    process.env.SUPABASE_STORAGE_FOLDER || 'To Fill 1';
+    process.env.SUPABASE_STORAGE_FOLDER || 'To Fill 2';
 
   const records = dataRows.map(rowToRecord);
   await insertContractRows(supabase, records);
