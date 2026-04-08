@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "extract": "node extract-contracts.mjs"
+    "extract": "node extract-contracts.mjs",
+    "extract:storage": "node extract-from-storage.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.1",

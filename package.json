@@ -5,6 +5,7 @@
   "scripts": {
     "postinstall": "npm install --prefix \"contract extraction prod\"",
     "start": "node \"./contract extraction prod/server.mjs\"",
-    "extract": "node \"./contract extraction prod/extract-contracts.mjs\""
+    "extract": "node \"./contract extraction prod/extract-contracts.mjs\"",
+    "extract:storage": "node \"./contract extraction prod/extract-from-storage.mjs\""
   }
 }

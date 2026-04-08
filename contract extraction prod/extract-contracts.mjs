@@ -5,7 +5,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { syncExtractionsToSupabase } from './supabase-output.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const DEFAULT_MODEL = process.env.OPENAI_MODEL_DEFAULT || 'gpt-5.2-2025-12-11';
 const CONTRACTS_DIR = path.join(__dirname, 'contracts');
@@ -366,29 +367,13 @@ Devuelve JSON estricto según el esquema. Usa null o "unknown" cuando falte info
   };
 }
 
-async function main() {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    console.error('Missing OPENAI_API_KEY. Copy .env.example to .env and set your key.');
-    process.exit(1);
-  }
-
-  const client = new OpenAI({ apiKey });
-
+/**
+ * @param {import('openai').OpenAI} client
+ * @param {{ name: string, buffer: Buffer, storagePath?: string }[]} fileEntries
+ */
+export async function runExtractionPipeline(client, fileEntries) {
   await fs.mkdir(CONTRACTS_DIR, { recursive: true });
   await fs.mkdir(OUTPUT_DIR, { recursive: true });
-
-  const entries = await fs.readdir(CONTRACTS_DIR, { withFileTypes: true });
-  const files = entries
-    .filter((e) => e.isFile() && SUPPORTED_EXT.has(path.extname(e.name).toLowerCase()))
-    .map((e) => e.name);
-
-  if (files.length === 0) {
-    console.log(
-      `No contract files found in "${path.basename(CONTRACTS_DIR)}". Add .pdf or image files and run again.`,
-    );
-    process.exit(0);
-  }
 
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   const outPath = path.join(OUTPUT_DIR, `contract_extractions_${timestamp}.csv`);
@@ -413,9 +398,10 @@ async function main() {
   /** @type {object[]} */
   const dataRows = [];
 
-  for (const name of files.sort()) {
-    const full = path.join(CONTRACTS_DIR, name);
-    const buf = await fs.readFile(full);
+  for (const entry of fileEntries.sort((a, b) => a.name.localeCompare(b.name))) {
+    const name = entry.name;
+    const buf = entry.buffer;
+    const rowFileName = entry.storagePath || name;
     const mime = mimeFromName(name);
     const nc = extractNcFromFileName(name);
     const nameFromFile = extractNameFromFileName(name);
@@ -434,7 +420,7 @@ async function main() {
           escapeCsvCell(data.deposit),
           escapeCsvCell(data.deposit_wording),
           escapeCsvCell(data.deposit_source),
-          escapeCsvCell(name),
+          escapeCsvCell(rowFileName),
           escapeCsvCell(data.model_used),
           escapeCsvCell(''),
         ].join(','),
@@ -450,11 +436,11 @@ async function main() {
         deposit: data.deposit,
         deposit_wording: data.deposit_wording,
         deposit_source: data.deposit_source,
-        file_name: name,
+        file_name: rowFileName,
         model_used: data.model_used,
         error: '',
       });
-      console.log(`OK: ${name}`);
+      console.log(`OK: ${rowFileName}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       rows.push(
@@ -469,7 +455,7 @@ async function main() {
           escapeCsvCell(''),
           escapeCsvCell(''),
           escapeCsvCell(''),
-          escapeCsvCell(name),
+          escapeCsvCell(rowFileName),
           escapeCsvCell(DEFAULT_MODEL),
           escapeCsvCell(msg),
         ].join(','),
@@ -485,11 +471,11 @@ async function main() {
         deposit: '',
         deposit_wording: '',
         deposit_source: '',
-        file_name: name,
+        file_name: rowFileName,
         model_used: DEFAULT_MODEL,
         error: msg,
       });
-      console.error(`FAIL: ${name} — ${msg}`);
+      console.error(`FAIL: ${rowFileName} — ${msg}`);
     }
   }
 
@@ -506,7 +492,44 @@ async function main() {
   }
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+async function main() {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    console.error('Missing OPENAI_API_KEY. Copy .env.example to .env and set your key.');
+    process.exit(1);
+  }
+
+  const client = new OpenAI({ apiKey });
+
+  const dirEntries = await fs.readdir(CONTRACTS_DIR, { withFileTypes: true });
+  const files = dirEntries
+    .filter((e) => e.isFile() && SUPPORTED_EXT.has(path.extname(e.name).toLowerCase()))
+    .map((e) => e.name);
+
+  if (files.length === 0) {
+    console.log(
+      `No contract files found in "${path.basename(CONTRACTS_DIR)}". Add .pdf or image files and run again.`,
+    );
+    process.exit(0);
+  }
+
+  /** @type {{ name: string, buffer: Buffer }[]} */
+  const fileEntries = [];
+  for (const name of files) {
+    const full = path.join(CONTRACTS_DIR, name);
+    const buf = await fs.readFile(full);
+    fileEntries.push({ name, buffer: buf });
+  }
+
+  await runExtractionPipeline(client, fileEntries);
+}
+
+const isExtractContractsCli =
+  process.argv[1] && path.resolve(process.argv[1]) === path.resolve(__filename);
+
+if (isExtractContractsCli) {
+  main().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+}
