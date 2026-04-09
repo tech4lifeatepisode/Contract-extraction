@@ -6,6 +6,7 @@ import path from 'path';
  * @param {object} row
  */
 function rowToRecord(row) {
+  const finalRent = row.final_rent ?? null;
   return {
     nc: row.nc ?? null,
     contract_title: row.contract_title ?? null,
@@ -16,13 +17,15 @@ function rowToRecord(row) {
     unit_type: row.unit_type ?? null,
     check_in_date: row.check_in_date ?? null,
     check_out_date: row.check_out_date ?? null,
+    // Legacy column: dashboards that still read "rent" see the same total as final_rent (CSV v2).
+    rent: finalRent ?? row.rent ?? null,
     base_rent: row.base_rent ?? null,
     extra_name: row.extra_name ?? null,
     extra_price: row.extra_price ?? null,
     discount_type: row.discount_type ?? null,
     price_after_discount: row.price_after_discount ?? null,
     discount_price: row.discount_price ?? null,
-    final_rent: row.final_rent ?? null,
+    final_rent: finalRent,
     deposit: row.deposit ?? null,
     deposit_wording: row.deposit_wording ?? null,
     deposit_source: row.deposit_source ?? null,
@@ -38,8 +41,25 @@ function rowToRecord(row) {
  */
 async function insertContractRows(supabase, records) {
   if (records.length === 0) return;
-  const { error } = await supabase.from('contract_extractions').insert(records);
-  if (error) throw new Error(`Supabase insert: ${error.message}`);
+  const { data, error } = await supabase
+    .from('contract_extractions')
+    .insert(records)
+    .select('id, nc, contract_title, base_rent, final_rent, rent, file_name');
+
+  if (error) {
+    const hint =
+      /column|does not exist|schema/i.test(error.message || '')
+        ? ' Run supabase-schema.sql (or supabase-migration-csv-v2-headers.sql) in Supabase SQL Editor so all v2 columns exist.'
+        : '';
+    throw new Error(`Supabase insert: ${error.message}${error.details ? ` — ${error.details}` : ''}${hint}`);
+  }
+
+  const first = data && data[0];
+  if (first) {
+    console.log(
+      `Supabase: row shape check — id=${first.id} contract_title=${JSON.stringify(first.contract_title)} base_rent=${JSON.stringify(first.base_rent)} final_rent=${JSON.stringify(first.final_rent)} rent=${JSON.stringify(first.rent)}`,
+    );
+  }
 }
 
 /**
